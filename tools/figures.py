@@ -19,26 +19,59 @@ def load_robustness(runs_root: str) -> List[dict]:
     return out
 
 def plot_robustness(curves: List[dict], out_dir: str):
-    ensure_dir(out_dir)
-    # aggregate by method (average TPR over files)
-    methods = sorted({m for c in curves for m in c.get("methods", {}).keys()})
-    if not methods or not curves: return None
+    """
+    Accepts a list of JSON payloads from either:
+      (A) robustness_curve_for_file: {"epsilons": [...], "methods": {m:{"tpr":[...]}}}
+      (B) run_robustness_for_list per-file JSONs: {"method": m, "epsilon": e, "result": {"records": [...]}}
 
-    eps = curves[0]["epsilons"]
-    for m in methods:
-        mat = []
-        for c in curves:
-            if m in c.get("methods", {}):
-                mat.append(c["methods"][m]["tpr"])
-        if not mat: continue
-        arr = np.array(mat)  # (n_files, n_eps)
-        mean = np.nanmean(arr, axis=0)
-        p10  = np.nanpercentile(arr, 10, axis=0)
-        p90  = np.nanpercentile(arr, 90, axis=0)
+    Produces mean curve with 10–90% band per method across files.
+    """
+    ensure_dir(out_dir)
+    if not curves:
+        print("WARN: no robustness curves found (nothing to plot)")
+        return None
+
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from collections import defaultdict
+
+    # method -> eps -> list[tpr]
+    agg = defaultdict(lambda: defaultdict(list))
+
+    for c in curves:
+        if isinstance(c, dict) and "methods" in c and "epsilons" in c:
+            eps = [float(e) for e in c.get("epsilons", [])]
+            for m, d in c.get("methods", {}).items():
+                tprs = d.get("tpr") or d.get("tprs")
+                if not tprs:
+                    continue
+                for e, t in zip(eps, tprs):
+                    try:
+                        agg[m][float(e)].append(float(t))
+                    except Exception:
+                        pass
+        elif isinstance(c, dict) and "method" in c and "epsilon" in c and "result" in c:
+            m = c.get("method")
+            e = float(c.get("epsilon"))
+            recs = c.get("result", {}).get("records", [])
+            if recs:
+                tpr = float(np.mean([1 if r.get("detected") else 0 for r in recs]))
+                agg[m][e].append(tpr)
+
+    if not agg:
+        print("WARN: robustness curves normalization produced no points")
+        return None
+
+    for m, series in agg.items():
+        eps_sorted = sorted(series.keys())
+        mat = np.array([[v for v in series[e]] for e in eps_sorted], dtype=float)  # (n_eps, n_files)
+        mean = np.nanmean(mat, axis=1)
+        p10  = np.nanpercentile(mat, 10, axis=1)
+        p90  = np.nanpercentile(mat, 90, axis=1)
 
         plt.figure()
-        plt.plot(eps, mean, label=f"{m} mean")
-        plt.fill_between(eps, p10, p90, alpha=0.2, label="10–90%")
+        plt.plot(eps_sorted, mean, marker="o", label=f"{m} mean")
+        plt.fill_between(eps_sorted, p10, p90, alpha=0.2, label="10–90%")
         plt.xlabel("Adversarial ε")
         plt.ylabel("TPR")
         plt.title(f"Robustness curve — {m}")

@@ -1,6 +1,47 @@
-import os
-import json
-from typing import Dict, List, Tuple, Any
+import os, glob, json
+from typing import Optional, List, Any, Dict, Tuple
+import numpy as np
+import pandas as pd
+from transitbench.utils import ensure_dir
+
+
+def aggregate_runs(runs_root: str, out_csv: Optional[str] = None):
+    """
+    Collects all injection/recovery records from completeness_*.json under runs_root
+    and returns a pandas DataFrame. Optionally writes CSV if out_csv is provided.
+    """
+    records: List[dict] = []
+    for p in glob.glob(os.path.join(runs_root, "completeness_*.json")):
+        try:
+            with open(p, "r") as f:
+                data = json.load(f)
+        except Exception:
+            continue
+        results = data.get("results", {})
+        for method, d in results.items():
+            for r in d.get("records", []):
+                row = dict(r)
+                row["method"] = row.get("method") or method
+                row["depth"] = float(row.get("depth", row.get("inj_depth", np.nan)))
+                row["duration"] = float(row.get("duration", row.get("inj_duration", np.nan)))
+                det = row.get("detected")
+                if isinstance(det, str):
+                    det_val = det.strip().lower() in ("1", "true", "yes")
+                else:
+                    det_val = bool(det)
+                row["detected"] = int(det_val)
+                records.append(row)
+
+    if not records:
+        print(f"[aggregate] no completeness_*.json records found under {runs_root}")
+        return None
+
+    df = pd.DataFrame.from_records(records)
+    if out_csv:
+        ensure_dir(os.path.dirname(out_csv))
+        df.to_csv(out_csv, index=False)
+        print(f"[aggregate] wrote {out_csv} with {len(df)} rows")
+    return df
 
 def _normalize_curves_data(curves: Any) -> Dict[str, List[Tuple[float, float]]]:
     """
