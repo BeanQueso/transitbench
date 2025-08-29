@@ -4,6 +4,26 @@ import numpy as np
 
 from transitbench.recover import inject_and_recover
 
+# --- project-relative defaults & env overrides ---
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+def _env(name: str, fallback: str) -> str:
+    return os.environ.get(name, fallback)
+
+DEFAULT_DATA_ROOT = _env("TB_DATA_ROOT", os.path.join(ROOT, "data", "raw"))
+DEFAULT_ROOTS = [
+    os.path.join(DEFAULT_DATA_ROOT, "false_positives"),
+    os.path.join(DEFAULT_DATA_ROOT, "transit_candidates"),
+]
+DEFAULT_GLOB = _env("TB_GLOB", "**/*.csv")
+DEFAULT_CACHE_CLEAN = os.path.abspath(os.path.expanduser(
+    _env("TB_CACHE_CLEAN", os.path.join(os.path.expanduser(os.environ.get("XDG_CACHE_HOME", "~/.cache")),
+                                        "transitbench", "clean"))
+))
+DEFAULT_RUNS_DIR = os.path.abspath(os.path.expanduser(
+    _env("TB_RUNS_DIR", os.path.join(ROOT, "runs"))
+))
+
 # --- robust CSV reader (handles HLSP/TESS variants) ---
 POSS_TIME = ("time","bjd","btjd","t_bjd","TIME")
 POSS_FLUX = ("flux","pdcsap_flux","sap_flux","pdcsap_fluxdtr","FLUX","SAP_FLUX","PDCSAP_FLUX")
@@ -76,30 +96,47 @@ def summarize(blocks):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--roots", nargs="+", default=[
-        "/Users/eshaantripathi/Documents/transitbench/data/raw/false_positives",
-        "/Users/eshaantripathi/Documents/transitbench/data/raw/transit_candidates",
-    ], help="Directories to search for CSVs (recursive)")
-    ap.add_argument("--glob", default="**/*.csv", help="Glob pattern under each root")
-    ap.add_argument("--max-files", type=int, default=120, help="Cap number of LCs to sample")
-    ap.add_argument("--profile", default="balanced", choices=["sensitive","balanced","strict"])
+    ap.add_argument("--roots", nargs="+", default=DEFAULT_ROOTS,
+                    help="Directories to search for CSVs (recursive)")
+    ap.add_argument("--glob", default=DEFAULT_GLOB,
+                    help="Glob pattern under each root")
+    ap.add_argument("--max-files", type=int, default=120,
+                    help="Cap number of LCs to sample")
+    ap.add_argument("--profile", default="balanced",
+                    choices=["sensitive","balanced","strict"])
     ap.add_argument("--methods", nargs="+", default=["oot-replace","prewhiten"])
-    ap.add_argument("--depths", nargs="+", type=float, default=[0.003, 0.005, 0.010])
-    ap.add_argument("--durations", nargs="+", type=float, default=[0.08, 0.12, 0.20])
-    ap.add_argument("--periods", nargs="+", type=float, default=[1.5, 3.0, 5.0])
-    ap.add_argument("--budget", type=float, default=12.0, help="Compute budget knob (smaller=faster)")
-    ap.add_argument("--nperiods", type=int, default=4000, help="Baseline n_periods for BLS")
-    ap.add_argument("--cache-clean", default="~/.cache/transitbench/clean", help="Directory for cleaned-series cache")
-    ap.add_argument("--runs-dir", default="/Users/eshaantripathi/Documents/transitbench/runs", help="Where to store outputs")
+    ap.add_argument("--depths", nargs="+", type=float,
+                    default=[0.003, 0.005, 0.010])
+    ap.add_argument("--durations", nargs="+", type=float,
+                    default=[0.08, 0.12, 0.20])
+    ap.add_argument("--periods", nargs="+", type=float,
+                    default=[1.5, 3.0, 5.0])
+    ap.add_argument("--budget", type=float, default=12.0,
+                    help="Compute budget knob (smaller=faster)")
+    ap.add_argument("--nperiods", type=int, default=4000,
+                    help="Baseline n_periods for BLS")
+    ap.add_argument("--cache-clean", default=DEFAULT_CACHE_CLEAN,
+                    help="Directory for cleaned-series cache")
+    ap.add_argument("--runs-dir", default=DEFAULT_RUNS_DIR,
+                    help="Where to store outputs")
     args = ap.parse_args()
+
+    # normalize paths (expand ~ and make absolute)
+    args.runs_dir = os.path.abspath(os.path.expanduser(args.runs_dir))
+    args.cache_clean = os.path.abspath(os.path.expanduser(args.cache_clean))
+    roots = [os.path.abspath(os.path.expanduser(r)) for r in (args.roots or [])]
 
     # gather files
     files = []
-    for r in args.roots:
+    for r in roots:
         files.extend(glob.glob(os.path.join(r, args.glob), recursive=True))
     files = sorted(set(files))[: args.max_files]
     if not files:
         raise SystemExit("No CSVs found—check --roots/--glob.")
+
+    print(f"[completeness] roots={roots}")
+    print(f"[completeness] glob='{args.glob}'")
+    print(f"[completeness] runs_dir='{args.runs_dir}' cache_clean='{args.cache_clean}'")
 
     os.makedirs(args.runs_dir, exist_ok=True)
 

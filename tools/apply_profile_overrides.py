@@ -18,5 +18,5 @@ def apply_profile_overrides(json_path: str):
     return recover.PROFILES
 
 # Example usage:
-# apply_profile_overrides("/Users/eshaantripathi/Documents/transitbench/profile_overrides.json")
+# apply_profile_overrides("/.../profile_overrides.json")
 # print("Applied profile overrides.")

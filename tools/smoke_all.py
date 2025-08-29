@@ -327,7 +327,14 @@ FIG_DIR   = os.path.join(PAPER_DIR, "figs")
 ensure_dir(RUNS_ROOT); ensure_dir(PAPER_DIR); ensure_dir(FIG_DIR)
 
 # Pick 1–3 fast sample files (fallback to your known path)
-FALLBACK = "/Users/eshaantripathi/Documents/transitbench/data/raw/false_positives/9727392_236.01/sector2/hlsp_tess-data-alerts_tess_phot_00009727392-s02_tess_v1_lc.csv"
+FALLBACK = os.path.join(
+    os.path.dirname(__file__),
+    "sample_data",
+    "false_positives",
+    "9727392_236.01",
+    "sector2",
+    "hlsp_tess-data-alerts_tess_phot_00009727392-s02_tess_v1_lc.csv"
+)
 
 def pick_sample_paths(n: int = 12) -> List[str]:
     pats = [
@@ -474,7 +481,7 @@ def main():
 if __name__ == "__main__":
     main()
 
-# /Users/eshaantripathi/Documents/transitbench/src/transitbench/core.py
+# /transitbench/src/transitbench/core.py
 def benchmark(
     self,
     method: Union[str, Iterable[str]] = ("oot-replace",),

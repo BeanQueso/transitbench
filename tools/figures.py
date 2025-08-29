@@ -1,4 +1,4 @@
-# /Users/eshaantripathi/Documents/transitbench/tools/figures.py
+# /transitbench/tools/figures.py
 from __future__ import annotations
 import os, json, glob
 from typing import Dict, Any, List
