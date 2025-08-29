@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "transitbench"
+version = "0.0.1"
+description = "Injection–recovery benchmarking and auto-vetting for ground-based transits"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["numpy","pandas","astropy","scikit-learn","matplotlib"]
+
+[project.scripts]
+tb-score = "transitbench.cli:main"
+tb-batch = "transitbench.cli_batch:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
