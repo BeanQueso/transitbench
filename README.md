@@ -331,10 +331,8 @@ git push origin feature/my-change
 
 ---
 
-## License & citation
-
-- **License:** MIT (proposed; adjust if needed).
-- **Cite:** If you use TransitBench in a publication, please cite the repository and the specific release tag used. A BibTeX snippet will be added once a DOI is minted.
+## Citation
+- **Cite:** If you use TransitBench in a publication, please cite the repository and the specific release tag used.
 
 ## AI Transparency
 This project was built with the help of an AI: GPT-5
