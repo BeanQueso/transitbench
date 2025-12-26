@@ -4,30 +4,12 @@ from __future__ import annotations
 import sys
 import os
 import argparse
-from typing import Any, Dict, Optional, Sequence
-
 import numpy as np
+from typing import Optional, Sequence
 
 from . import api
+from .core import load
 from .batch import run_batch
-
-
-def _parse_overrides(kvs: Sequence[str] | None) -> Dict[str, Any]:
-    """
-    Parse simple key=val overrides. Tries literal eval, falls back to str.
-    """
-    out: Dict[str, Any] = {}
-    for kv in (kvs or []):
-        if "=" not in kv:
-            continue
-        k, v = kv.split("=", 1)
-        k = k.strip()
-        v = v.strip()
-        try:
-            out[k] = eval(v, {}, {})
-        except Exception:
-            out[k] = v
-    return out
 
 
 # ----------------------
@@ -58,17 +40,8 @@ def main_score(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--per-injection-search", action="store_true", default=True)
     ap.add_argument("--no-per-injection-search", dest="per_injection_search", action="store_false")
 
-    ap.add_argument("--window-days", type=float, default=0.30)
-    ap.add_argument("--mask-pad", type=float, default=3.0)
     ap.add_argument("--oot-strategy", default="median", choices=["median", "resample"])
-
-    ap.add_argument("--baseline-period", type=float, default=None)
-    ap.add_argument("--baseline-t0", type=float, default=None)
-    ap.add_argument("--baseline-duration", type=float, default=None)
-
     ap.add_argument("--profile", choices=["sensitive", "balanced", "strict"], default=None)
-    ap.add_argument("--profile-override", action="append", default=[],
-                    help="Override profile key=val (e.g., --profile-override rel_window=0.025)")
 
     ap.add_argument("--save-report", default="", help="Optional path to save a text report.")
     args = ap.parse_args(argv)
@@ -76,37 +49,26 @@ def main_score(argv: Optional[Sequence[str]] = None) -> int:
     durations = tuple(float(x) for x in args.durations.split(",") if x.strip())
     depths = tuple(float(x) for x in args.depths.split(",") if x.strip())
     inj_periods = tuple(float(x) for x in args.inj_periods.split(",") if x.strip())
-    inj_durations = None
     if args.inj_durations.strip():
-        inj_durations = tuple(float(x) for x in args.inj_durations.split(",") if x.strip())
-    periods_grid = np.linspace(args.period_min, args.period_max, args.n_periods)
+        # kept for compatibility; currently not used directly
+        _ = tuple(float(x) for x in args.inj_durations.split(",") if x.strip())
 
     compare_with = [s.strip() for s in args.compare_with.split(",") if s.strip()]
 
-    overrides = _parse_overrides(args.profile_override)
-
-    lc = api.load(args.path, time=args.time, flux=args.flux)
+    lc = load(args.path, time=args.time, flux=args.flux)
 
     res = lc.benchmark(
         method=args.method,
         compare_with=compare_with,
         durations=durations,
         depths=depths,
-        inj_periods=inj_periods,
-        inj_durations=inj_durations,
-        periods_grid=periods_grid,
-        window_days=args.window_days,
-        mask_pad=args.mask_pad,
-        baseline_period=args.baseline_period,
-        baseline_t0=args.baseline_t0,
-        baseline_duration=args.baseline_duration,
+        periods=inj_periods,
         decision_metric=args.decision_metric,
-        snr_thresh=args.snr_thresh,
+        snr_threshold=args.snr_thresh,
         rel_window=args.rel_window,
         per_injection_search=args.per_injection_search,
         oot_strategy=args.oot_strategy,
         profile=args.profile,
-        profile_overrides=overrides,
         compute_budget=None,
         cost_model=None,
     )
@@ -158,7 +120,6 @@ def main_batch(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--baseline-duration", type=float, default=None)
 
     ap.add_argument("--profile", choices=["sensitive", "balanced", "strict"], default=None)
-    ap.add_argument("--profile-override", action="append", default=[])
 
     ap.add_argument("--n-workers", type=int, default=1, help="Process workers (1 = serial)")
     ap.add_argument("--save-to", default="", help="Custom path for the single text report. Default: <out_root>/batch_report.txt")
@@ -167,15 +128,7 @@ def main_batch(argv: Optional[Sequence[str]] = None) -> int:
 
     durations = tuple(float(x) for x in args.durations.split(",") if x.strip())
     depths = tuple(float(x) for x in args.depths.split(",") if x.strip())
-    inj_periods = tuple(float(x) for x in args.inj_periods.split(",") if x.strip())
-    inj_durations = None
-    if args.inj_durations.strip():
-        inj_durations = tuple(float(x) for x in args.inj_durations.split(",") if x.strip())
-    periods_grid = np.linspace(args.period_min, args.period_max, args.n_periods)
-
     compare_with = [s.strip() for s in args.compare_with.split(",") if s.strip()]
-    overrides = _parse_overrides(args.profile_override)
-
     save_to = args.save_to if args.save_to else None
 
     _ = run_batch(
@@ -187,23 +140,15 @@ def main_batch(argv: Optional[Sequence[str]] = None) -> int:
         compare_modes=compare_with,
         durations=durations,
         depths=depths,
-        inj_periods=inj_periods,
-        inj_durations=inj_durations,
-        periods_grid=periods_grid,
+        period_min=args.period_min,
+        period_max=args.period_max,
+        n_periods=args.n_periods,
         decision_metric=args.decision_metric,
         snr_thresh=args.snr_thresh,
         rel_window=args.rel_window,
-        per_injection_search=True,
-        window_days=args.window_days,
-        mask_pad=args.mask_pad,
+        per_injection_search=args.per_injection_search,
         oot_strategy=args.oot_strategy,
-        baseline_period=args.baseline_period,
-        baseline_t0=args.baseline_t0,
-        baseline_duration=args.baseline_duration,
-        compute_budget=None,
-        cost_model=None,
         profile=args.profile,
-        profile_overrides=overrides,
         n_workers=int(args.n_workers),
         save_to=save_to,
     )

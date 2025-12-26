@@ -2,16 +2,13 @@
 from __future__ import annotations
 
 import os
-import sys
 import glob
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
 
-from .io import load_timeseries
-from .core import LightCurve
-from .api import to_text_report
+from .core import load
 
 
 def _summarize_one_result(res: Dict[str, Any], label: str) -> str:
@@ -23,11 +20,24 @@ def _summarize_one_result(res: Dict[str, Any], label: str) -> str:
         f"  n_pts={basic.get('n_pts', '—')}, rms_oot={basic.get('rms_oot', '—')}, beta10={basic.get('beta10', '—')}"
     )
     for m, blk in res.get("methods", {}).items():
-        n = blk.get("n_injections", 0) or 0
-        d = blk.get("detected", 0) or 0
+        metrics = blk.get("metrics", {})
+        # fallback to records-derived metrics if missing
+        if not metrics:
+            recs = blk.get("records", [])
+            det = np.array([1 if (isinstance(r, dict) and r.get("detected")) else 0 for r in recs], dtype=int)
+            snr = np.array([r.get("snr_injected", np.nan) for r in recs], dtype=float)
+            metrics = dict(
+                n_injections=len(recs),
+                detected=int(det.sum()),
+                tpr=float(det.mean()) if len(det) else 0.0,
+                snr_mean=float(np.nanmean(snr)) if np.size(snr) else np.nan,
+                snr_median=float(np.nanmedian(snr)) if np.size(snr) else np.nan,
+            )
+        n = metrics.get("n_injections", 0) or 0
+        d = metrics.get("detected", 0) or 0
         tpr = (d / n) if n else 0.0
-        smean = blk.get("snr_mean", np.nan)
-        smed = blk.get("snr_median", np.nan)
+        smean = metrics.get("snr_mean", np.nan)
+        smed = metrics.get("snr_median", np.nan)
         lines.append(
             f"  {m:11s}: Detected {d}/{n} ({tpr:.3f}), mean_z={smean:.2f}, median_z={smed:.2f}"
         )
@@ -39,37 +49,22 @@ def _batch_worker(job: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     """
     Execute one scoring job. Returns (path, result_dict).
     """
-    from . import recover  # local import inside worker
-    # Load LC
-    ts = load_timeseries(job["path"], time_col=job["time_col"], flux_col=job["flux_col"])
-    lc = LightCurve(time=ts["time"], flux=ts["flux"], meta={"source_path": job["path"]})
+    lc = load(job["path"], time=job["time_col"], flux=job["flux_col"], label=job["label"])
 
-    # Run benchmark via recover to avoid circulars
-    res = recover.inject_and_recover(
-        np.asarray(lc.time, float),
-        np.asarray(lc.flux, float),
+    res = lc.benchmark(
         method=job["method"],
         compare_with=job["compare_modes"],
         durations=job["durations"],
         depths=job["depths"],
-        inj_periods=job["inj_periods"],
-        inj_durations=job["inj_durations"],
-        periods_grid=job["periods_grid"],
-        window_days=job["window_days"],
-        mask_pad=job["mask_pad"],
-        baseline_period=job["baseline_period"],
-        baseline_t0=job["baseline_t0"],
-        baseline_duration=job["baseline_duration"],
+        periods=job["periods"],
         decision_metric=job["decision_metric"],
-        snr_thresh=job["snr_thresh"],
+        snr_threshold=job["snr_thresh"],
         rel_window=job["rel_window"],
-        allow_harmonics=True,
         per_injection_search=job["per_injection_search"],
         compute_budget=job["compute_budget"],
         cost_model=job["cost_model"],
         oot_strategy=job["oot_strategy"],
         profile=job["profile"],
-        profile_overrides=job["profile_overrides"],
     )
     return job["path"], res
 
@@ -96,29 +91,23 @@ def run_batch(
     *,
     inputs: Sequence[str],
     out_root: str,
-    time_col: str,
-    flux_col: str,
+    time_col: str = "time",
+    flux_col: str = "flux",
     method: str = "oot-replace",
     compare_modes: Optional[Sequence[str]] = None,
     durations: Sequence[float] = (0.08, 0.12, 0.20),
     depths: Sequence[float] = (0.003, 0.005, 0.01),
-    inj_periods: Sequence[float] = (1.5, 3.0, 5.0),
-    inj_durations: Optional[Sequence[float]] = None,
-    periods_grid: Optional[np.ndarray] = None,
+    period_min: float = 0.5,
+    period_max: float = 20.0,
+    n_periods: int = 10000,
     decision_metric: str = "zscore",
     snr_thresh: float = 6.0,
     rel_window: float = 0.015,
     per_injection_search: bool = True,
-    window_days: float = 0.3,
-    mask_pad: float = 3.0,
     oot_strategy: str = "median",
-    baseline_period: Optional[float] = None,
-    baseline_t0: Optional[float] = None,
-    baseline_duration: Optional[float] = None,
     compute_budget: Optional[int] = None,
     cost_model: Any = None,
     profile: Optional[str] = None,
-    profile_overrides: Optional[Dict[str, Any]] = None,
     n_workers: int = 1,
     save_to: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -139,21 +128,17 @@ def run_batch(
     print(f"[TransitBench] Output root: {out_root}")
     print(f"[TransitBench] Using {n_workers} worker(s).")
 
+    periods = np.linspace(float(period_min), float(period_max), int(n_periods))
+
     job_proto = dict(
         time_col=time_col,
         flux_col=flux_col,
+        label=None,
         method=method,
         compare_modes=list(compare_modes or []),
         durations=tuple(durations),
         depths=tuple(depths),
-        inj_periods=tuple(inj_periods),
-        inj_durations=None if inj_durations is None else tuple(inj_durations),
-        periods_grid=periods_grid,
-        window_days=window_days,
-        mask_pad=mask_pad,
-        baseline_period=baseline_period,
-        baseline_t0=baseline_t0,
-        baseline_duration=baseline_duration,
+        periods=periods,
         decision_metric=decision_metric,
         snr_thresh=snr_thresh,
         rel_window=rel_window,
@@ -162,7 +147,6 @@ def run_batch(
         cost_model=cost_model,
         oot_strategy=oot_strategy,
         profile=profile,
-        profile_overrides=profile_overrides or {},
     )
 
     results: Dict[str, Any] = {}
@@ -180,6 +164,7 @@ def run_batch(
             for p in files:
                 j = dict(job_proto)
                 j["path"] = p
+                j["label"] = os.path.basename(p)
                 futs.append(ex.submit(_batch_worker, j))
             for fut in as_completed(futs):
                 path, res = fut.result()
@@ -188,6 +173,7 @@ def run_batch(
         for p in files:
             j = dict(job_proto)
             j["path"] = p
+            j["label"] = os.path.basename(p)
             path, res = _batch_worker(j)
             results[path] = res
 

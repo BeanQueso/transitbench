@@ -62,8 +62,8 @@ def plot_completeness_heatmap(records: List[Dict], out_path: str):
         if r.get("detected", False): num[i,j] += 1.0
     frac = np.divide(num, den, out=np.zeros_like(num), where=den>0)
     plt.figure()
-    im = plt.imshow(frac, origin="lower", aspect="auto",
-                    extent=[min(periods), max(periods), min(depths), max(depths)])
+    extent = (min(periods), max(periods), min(depths), max(depths))
+    im = plt.imshow(frac, origin="lower", aspect="auto", extent=extent)
     plt.xlabel("Period (days)")
     plt.ylabel("Depth")
     cbar = plt.colorbar(im)
@@ -110,6 +110,6 @@ def write_completeness_table_csv(records: List[Dict], out_path: str):
         for i,d in enumerate(depths):
             row = [d]
             for j,_ in enumerate(periods):
-                frac = num[i,j]/den[i,j] if den[i,j]>0 else ""
-                row.append(frac)
+                frac = num[i,j]/den[i,j] if den[i,j]>0 else np.nan
+                row.append(float(frac))
             w.writerow(row)

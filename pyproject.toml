@@ -8,7 +8,7 @@ version = "0.0.1"
 description = "Injection–recovery benchmarking and auto-vetting for ground-based transits"
 readme = "README.md"
 requires-python = ">=3.9"
-dependencies = ["numpy","pandas","astropy","scikit-learn","matplotlib"]
+dependencies = ["numpy", "pandas", "astropy", "scikit-learn", "matplotlib", "tqdm"]
 
 [project.scripts]
 tb-score = "transitbench.cli:main"

@@ -121,7 +121,7 @@ class Run:
             run.finalize(summary={"global_tpr": 0.976, "n": 3240})
     """
     def __init__(self, kind: str, profile: Optional[str] = None,
-                 config: Dict[str, Any] = None, seed: Optional[int] = None):
+                 config: Optional[Dict[str, Any]] = None, seed: Optional[int] = None):
         rid = f"{kind}-{_now_iso()}-{uuid.uuid4().hex[:8]}"
         self.root = runs_root()
         self.path = self.root / rid

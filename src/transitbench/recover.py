@@ -16,6 +16,7 @@ try:
     _HAS_ASTROPY = True
 except Exception:
     _HAS_ASTROPY = False
+    BoxLeastSquares = None  # type: ignore[misc,assignment]
 
 
 # ---------------------------
@@ -85,6 +86,7 @@ def apply_profile_overrides(path: str | None = None, overrides: dict | None = No
     except Exception:
         return False
 
+    overrides = overrides or {}
     sugg = overrides.get("suggest_tau_base") or overrides.get("tau_base") or {}
     changed = False
     if not isinstance(globals().get("PROFILES", None), dict):
@@ -248,12 +250,12 @@ def _compute_baseline_bls(t, f, durations, n_periods=4000, min_period=None, max_
     dy = np.full_like(y, dy0, dtype=float)
 
     if min_period is None:
-        min_period = max(0.3, 2.0 * np.nanmedian(np.diff(np.unique(t))))
+        min_period = max(0.3, float(2.0 * np.nanmedian(np.diff(np.unique(t)))))
     if max_period is None:
-        max_period = max(1.1 * (t.max() - t.min()) / 5.0, min_period + 0.5)
+        max_period = max(1.1 * (t.max() - t.min()) / 5.0, float(min_period) + 0.5)
 
     periods = np.linspace(min_period, max_period, int(n_periods))
-    bls = BoxLeastSquares(t, y, dy=dy)
+    bls = BoxLeastSquares(t, y, dy=dy)  # type: ignore[operator]
 
     best = dict(period=np.nan, t0=np.nan, duration=np.nan, depth=np.nan, depth_err=np.nan, z_top=-np.inf)
     for dur in durations:
@@ -299,13 +301,13 @@ def _bls_grid_local(t, y, periods, durations):
     dy0 = max(dy0, DY_FLOOR)
     dy = np.full_like(y, dy0, dtype=float)
 
-    bls = BoxLeastSquares(t, y, dy=dy)
+    bls = BoxLeastSquares(t, y, dy=dy)  # type: ignore[operator]
 
     z_best = -np.inf; p_best = np.nan; d_best = np.nan
     for dur in durations:
         if not (np.isfinite(dur) and dur > 0):
             continue
-        res = bls.power(periods, dur, objective="likelihood")
+        res = bls.power(periods, float(dur), objective="likelihood")
         z_like = res.depth / np.where(res.depth_err > 0, res.depth_err, np.inf)
         z_pow  = np.sqrt(np.clip(res.power, 0, np.inf))
         z_like_safe = np.where(np.isfinite(z_like) & (np.abs(z_like) < Z_LIKE_CAP), z_like, np.nan)
@@ -354,8 +356,8 @@ def _n_transits_observed(t, period, duration, t_ref=None):
 
     tmin, tmax = np.nanmin(t), np.nanmax(t)
     # Pick t_ref to center windows; default to median time
-    if not (np.isfinite(t_ref)):
-        t_ref = np.nanmedian(t)
+    if t_ref is None or not (np.isfinite(t_ref)):
+        t_ref = float(np.nanmedian(t))
 
     k0 = int(np.floor((tmin - t_ref) / period)) - 1
     k1 = int(np.ceil((tmax - t_ref) / period)) + 1
@@ -383,7 +385,7 @@ def _robust_std(y: np.ndarray) -> float:
         return float("nan")
     med = np.nanmedian(y)
     mad = np.nanmedian(np.abs(y - med))
-    return 1.4826 * mad  # MAD->sigma
+    return float(1.4826 * mad)  # MAD->sigma
 
 def _beta_n(y: np.ndarray, N: int = 10) -> float:
     """
@@ -611,6 +613,9 @@ def sample_null_z(
     meta : dict
         Metadata about cleaning, grids and caches used.
     """
+    if not _HAS_ASTROPY:
+        raise RuntimeError("astropy is required for BLS; install astropy to use transitbench.")
+
     t = np.asarray(t, float); f = np.asarray(f, float)
     m = _finite_mask(t, f)
     t, f = t[m], f[m]
@@ -619,7 +624,7 @@ def sample_null_z(
 
     # Determine period range if not given
     if min_period is None:
-        min_period = max(0.3, 2.0 * np.nanmedian(np.diff(np.unique(t))))
+        min_period = max(0.3, float(2.0 * np.nanmedian(np.diff(np.unique(t)))))
     if max_period is None:
         max_period = max(1.1 * (t.max() - t.min()) / 5.0, float(min_period) + 0.5)
 
@@ -628,6 +633,7 @@ def sample_null_z(
     meta_clean = {}
 
     t_clean = f_clean = None
+    cache_dir = key = cache_file = None
     if cache_clean_root:
         cache_dir = os.path.expanduser(cache_clean_root)
         os.makedirs(cache_dir, exist_ok=True)
@@ -648,7 +654,7 @@ def sample_null_z(
         t_clean, f_clean, meta_clean = get_clean_series(
             t, f, method=method, n_periods=int(kwargs.get("n_periods", 1500)), label=label, **kwargs
         )
-        if cache_clean_root:
+        if cache_clean_root and cache_dir and key:
             try:
                 np.savez_compressed(
                     os.path.join(cache_dir, f"clean-{method}-{key}.npz"),
@@ -669,6 +675,8 @@ def sample_null_z(
         dy0 = 1.0
     dy0 = max(dy0, DY_FLOOR)
     dy = np.full_like(y, dy0, dtype=float)
+    if BoxLeastSquares is None:
+        raise RuntimeError("astropy is required for BLS; install astropy to use transitbench.")
     bls = BoxLeastSquares(t_clean, y, dy=dy)
 
     # 3) Random periods & local scans (with optional cache)
@@ -698,6 +706,8 @@ def sample_null_z(
                 return z_vals, meta
             except Exception:
                 pass
+    else:
+        z_cache_file = None
 
     rng_local = np.random.default_rng(seed)
     trial_p = rng_local.uniform(float(min_period), float(max_period), int(n_samples))
@@ -738,7 +748,7 @@ def sample_null_z(
         **cache_meta,
     }
 
-    if cache_null_root:
+    if cache_null_root and z_cache_file:
         try:
             np.savez_compressed(z_cache_file, z=z_vals.astype(np.float64), meta=np.array(json.dumps(meta)))
         except Exception:
@@ -1044,6 +1054,8 @@ def inject_and_recover(
                 # 5) Coverage info
                 cov, ntr = _n_transits_observed(t_clean, per, dur, t_ref=tmid)
 
+                cov, ntr = _n_transits_observed(t_clean, per, dur, t_ref=tmid)
+
                 rec = {
                     "label": label,
                     "method": method,
@@ -1056,8 +1068,11 @@ def inject_and_recover(
                     "snr_match": match_label,
                     "match_period": float(match_period) if np.isfinite(match_period) else np.nan,
                     "detected": bool(detected),
-                    "phase_cov": float(cov),
-                    "n_transits_obs": int(ntr),
+                    # keep both legacy and canonical coverage keys for downstream plotting
+                    "phase_cov": float(cov),              # legacy
+                    "phase_coverage": float(cov),         # preferred
+                    "n_transits_obs": int(ntr),           # legacy
+                    "n_transits_observed": int(ntr),      # preferred
                     "grid_n_periods": int(n_periods_eff),
                     "grid_n_durations": 1,
                     "grid_downsampled": bool(grid_downsampled),

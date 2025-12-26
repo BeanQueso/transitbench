@@ -11,7 +11,9 @@ def roc_from_scores(z_pos: np.ndarray, z_neg: np.ndarray, taus: np.ndarray) -> D
 def bootstrap_ci(values: np.ndarray, fn, nboot: int = 1000, alpha: float = 0.05) -> Tuple[float, float]:
     idx = np.random.randint(0, len(values), size=(nboot, len(values)))
     boots = np.array([fn(values[i]) for i in idx])
-    return (np.quantile(boots, alpha/2), np.quantile(boots, 1-alpha/2))
+    lo = float(np.quantile(boots, alpha/2))
+    hi = float(np.quantile(boots, 1-alpha/2))
+    return lo, hi
 
 def roc_with_ci(z_pos: np.ndarray, z_neg: np.ndarray, taus: np.ndarray, nboot: int = 1000, alpha: float = 0.05):
     tpr = []; fpr = []; tpr_lo=[]; tpr_hi=[]; fpr_lo=[]; fpr_hi=[]

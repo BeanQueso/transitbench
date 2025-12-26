@@ -1,7 +1,7 @@
 # src/transitbench/io.py
 import os
 import io
-from typing import Optional, Tuple, Dict, Any, List
+from typing import Optional, Tuple, Dict, Any, List, cast
 
 import numpy as np
 import pandas as pd
@@ -171,11 +171,12 @@ def load_timeseries(
 
     # ---------- FITS (optionally BTJD) ----------
     if ext in {".fits", ".fit", ".fz"}:
-        fits = _maybe_import_fits()
-        if fits is None:
+        fits_mod = _maybe_import_fits()
+        if fits_mod is None:
             raise RuntimeError("To read FITS files, install astropy (pip install astropy).")
 
-        with fits.open(path) as hdul:
+        # cast to Any to keep type checkers happy about context manager methods
+        with cast(Any, fits_mod).open(path) as hdul:
             # Try common HDU names for light curves
             # (TESS: 'LIGHTCURVE' or first bin table after primary)
             hdu = None

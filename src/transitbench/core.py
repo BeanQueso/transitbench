@@ -2,7 +2,7 @@
 from __future__ import annotations
 import numpy as np
 from dataclasses import dataclass, field
-from typing import Dict, Any, Iterable, Optional, Union, List, Tuple
+from typing import Dict, Any, Iterable, Optional, Union, List, Tuple, cast
 import pandas as pd
 from . import recover
 from .io import load_timeseries  # uses the robust _find_col-based loader under the hood
@@ -193,31 +193,27 @@ class LightCurve:
             "methods": {}
         }
 
-        call_kwargs = dict(
-            # grid / decision
-            per_injection_search=per_injection_search,
-            decision_metric=decision_metric,
-            snr_threshold=(snr_map if snr_map else snr_threshold),
-            rel_window=rel_window,
-            inj_durations=list(durations) if durations is not None else None,
-            inj_periods=list(periods) if periods is not None else None,
-            depths=list(depths) if depths is not None else None,
-            compute_budget=compute_budget,
-            cost_model=cost_model,
-            # detrending
-            oot_strategy=oot_strategy,
-            prewhiten_nharm=prewhiten_nharm,
-            # adversarial
-            adversarial=adversarial,
-            adversarial_eps=adversarial_eps,
-            adversarial_seed=adversarial_seed,
-            # provenance label
-            label=self.label or "lightcurve",
-        )
-
-
         for m in methods:
-            blk = recover.inject_and_recover(self.t, self.f, method=m, **call_kwargs)
+            blk = recover.inject_and_recover(
+                self.t,
+                self.f,
+                method=m,
+                per_injection_search=bool(per_injection_search),
+                decision_metric=str(decision_metric),
+                snr_threshold=(snr_map if snr_map else snr_threshold),
+                rel_window=float(rel_window) if rel_window is not None else 0.0,
+                durations=list(durations) if durations is not None else None,
+                periods=list(periods) if periods is not None else None,
+                depths=list(depths) if depths is not None else None,
+                compute_budget=compute_budget,
+                cost_model=cost_model,
+                oot_strategy=oot_strategy,
+                prewhiten_nharm=prewhiten_nharm,
+                adversarial=bool(adversarial),
+                adversarial_eps=float(adversarial_eps),
+                adversarial_seed=adversarial_seed,
+                label=self.label or "lightcurve",
+            )
             blk = _canonicalize_method_block(blk, m)
             metrics = _metrics_from_records(blk.get("records", []))
             out["methods"][m] = {
@@ -317,11 +313,11 @@ def _load_fits_lightcurve(
     """
     path = Path(path)
     try:
-        from astropy.io import fits  # local import to keep astropy optional
+        from astropy.io import fits as fits_mod  # local import to keep astropy optional
     except Exception as e:
         raise ImportError("Reading FITS requires astropy. Please `pip install astropy`.") from e
 
-    with fits.open(path, memmap=False) as hdul:
+    with cast(Any, fits_mod).open(str(path), memmap=False) as hdul:
         # Heuristics: look for the first table HDU with TIME + FLUX-like columns.
         table_hdu = None
         for hdu in hdul:
@@ -401,16 +397,15 @@ def load(
         # Text/CSV flow via io.load_timeseries (support both new/legacy signatures)
         try:
             res = load_timeseries(
-                path,
+                str(path),
                 time_col=time,
                 flux_col=flux,
                 quality_col=quality_col,
-                return_meta=True,
                 **kwargs,
             )
         except TypeError:
-            # Legacy io.load_timeseries without quality_col/return_meta
-            res = load_timeseries(path, time_col=time, flux_col=flux, **kwargs)
+            # Legacy io.load_timeseries without quality_col
+            res = load_timeseries(str(path), time_col=time, flux_col=flux, **kwargs)
 
         t, f, meta = _coerce_timeseries_result(res)
 
